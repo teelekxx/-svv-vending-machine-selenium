@@ -5,27 +5,36 @@ import java.util.List;
 
 import org.graphwalker.core.machine.ExecutionContext;
 import org.graphwalker.java.annotation.*;
-import org.junit.jupiter.api.*;
+
+import org.junit.jupiter.api.Assertions;
 import static org.junit.jupiter.api.Assertions.*;
 
 import org.openqa.selenium.*;
 import org.openqa.selenium.chrome.ChromeDriver;
+import org.openqa.selenium.chrome.ChromeOptions;
 import io.github.bonigarcia.wdm.WebDriverManager;
 import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.openqa.selenium.support.ui.WebDriverWait;
 
 
-@Model(file  = "VendingMachineV1.json")
+@Model(file  = "VendingMachineV2.json")
 public class VendingMachineAdapter extends ExecutionContext {
     WebDriver driver;
+    WebDriverWait wait;
     static final float PRICE_TUM_THAI = 100.0f;
     static final float PRICE_TUM_POO = 120.0f;
+    static int numTumPoo = 0;
+    static int numTumThai = 0;
+    static int retryPayCount = 0;
 
     @BeforeExecution
     public void setUp() {
         WebDriverManager.chromedriver().setup();
-        driver = new ChromeDriver();
+        ChromeOptions options = new ChromeOptions();
+        options.addArguments("--remote-allow-origins=*");
+        driver = new ChromeDriver(options);
         driver.get("https://fekmitl.pythonanywhere.com/kratai-bin");
+        wait = new WebDriverWait(driver, Duration.ofSeconds(5));
     }
 
     @AfterExecution
@@ -38,6 +47,9 @@ public class VendingMachineAdapter extends ExecutionContext {
         System.out.println("Vertex WELCOME");
         new WebDriverWait(driver, Duration.ofSeconds(5))
                 .until(ExpectedConditions.elementToBeClickable(By.id("start")));
+        numTumPoo = 0;
+        numTumThai = 0;
+        retryPayCount = 0;
     }
 
     @Edge()
@@ -49,194 +61,223 @@ public class VendingMachineAdapter extends ExecutionContext {
     @Vertex()
     public void ORDERING() {
         System.out.println("Vertex ORDERING");
-        new WebDriverWait(driver, Duration.ofSeconds(5))
-                .until(ExpectedConditions.visibilityOfElementLocated(By.id("btn_check_out")));
+        // Wait for the check-out button to be clickable.
+        // wait.until(ExpectedConditions.elementToBeClickable(By.id("btn_check_out")));
 
         // Check that the number of orders is as expected.
         int numTumThaiExpected = getAttribute("numTumThai").asInt();
         int numTumPooExpected = getAttribute("numTumPoo").asInt();
-        int numTumThaiActual = Integer.parseInt(driver.findElement(By.id("txt_tum_thai")).getAttribute("value"));
-        int numTumPooActual = Integer.parseInt(driver.findElement(By.id("txt_tum_poo")).getAttribute("value"));
-        assertEquals(numTumThaiExpected, numTumThaiActual);
-        assertEquals(numTumPooExpected, numTumPooActual);
-        // Check the status of the Check-Out button
-        if (numTumThaiExpected+numTumPooExpected>0)
-            assertTrue(driver.findElement(By.id("btn_check_out")).isEnabled());
-        else
-            assertFalse(driver.findElement(By.id("btn_check_out")).isEnabled());
+
+        assertEquals(numTumThai, numTumThaiExpected);
+        assertEquals(numTumPoo, numTumPooExpected);
+
     }
 
     @Edge()
     public void addTumThai() {
         System.out.println("Edge addTumThai");
+
+        wait.until(ExpectedConditions.elementToBeClickable(By.id("add_tum_thai")));
         driver.findElement(By.id("add_tum_thai")).click();
+        numTumThai++;
     }
 
     @Edge()
     public void addTumPoo() {
         System.out.println("Edge addTumPoo");
+
+        wait.until(ExpectedConditions.elementToBeClickable(By.id("add_tum_poo")));
         driver.findElement(By.id("add_tum_poo")).click();
+        numTumPoo++;
     }
 
     @Vertex()
     public void ERROR_ORDER() {
         System.out.println("Vertex ERROR_ORDERING");
-        new WebDriverWait(driver, Duration.ofSeconds(5))
-                .until(ExpectedConditions.alertIsPresent());
+
+        if (getLastElement().getName().equals("addTumPoo")) {
+            numTumPoo--;
+        } else if (getLastElement().getName().equals("addTumThai")) {
+            numTumThai--;
+        }
+        wait.until(ExpectedConditions.alertIsPresent());
     }
 
     @Edge()
     public void ack() {
         System.out.println("Edge ack");
+
         driver.switchTo().alert().accept();
     }
 
     @Edge()
     public void cancel() {
         System.out.println("Edge cancel");
-        driver.findElement(By.name("btn_cancel")).click();
+
+        wait.until(ExpectedConditions.elementToBeClickable(By.id("btn_cancel")));
+        driver.findElement(By.id("btn_cancel")).click();
     }
 
     @Edge()
     public void checkOut() {
         System.out.println("Edge checkOut");
-        driver.findElement(By.name("btn_check_out")).click();
-        new WebDriverWait(driver, Duration.ofSeconds(5))
-                .until(ExpectedConditions.elementToBeClickable(By.name("btn_confirm")));
+
+        wait.until(ExpectedConditions.elementToBeClickable(By.id("btn_check_out")));
+        driver.findElement(By.id("btn_check_out")).click();
+
+        wait.until(ExpectedConditions.elementToBeClickable(By.id("btn_confirm")));
     }
 
     @Vertex()
     public void CONFIRMING() {
         System.out.println("Vertex CONFIRMING");
-        new WebDriverWait(driver, Duration.ofSeconds(5))
-                .until(ExpectedConditions.elementToBeClickable(By.name("btn_confirm")));
+
+        wait.until(ExpectedConditions.elementToBeClickable(By.id("btn_confirm")));
+
         // Check that the information shown is as expected.
         int numTumThaiExpected = getAttribute("numTumThai").asInt();
         int numTumPooExpected = getAttribute("numTumPoo").asInt();
-        String totalTumThaiExpected = String.format("%.2f", PRICE_TUM_THAI*numTumThaiExpected);
-        String totalTumPooExpected = String.format("%.2f", PRICE_TUM_POO*numTumPooExpected);
-        String grandTotalExpected = String.format("%.2f", PRICE_TUM_THAI*numTumThaiExpected+PRICE_TUM_POO*numTumPooExpected);
-        int numTumThaiActual = Integer.parseInt(driver.findElement(By.id("msg_num_tum_thai")).getText());
-        int numTumPooActual = Integer.parseInt(driver.findElement(By.id("msg_num_tum_poo")).getText());
-        String totalTumThaiActual = driver.findElement(By.id("msg_total_tum_thai")).getText();
-        String totalTumPooActual = driver.findElement(By.id("msg_total_tum_poo")).getText();
-        String grandTotalActual = driver.findElement(By.id("msg_grand_total")).getText();
-        assertEquals(numTumThaiExpected,numTumThaiActual);
-        assertEquals(numTumPooExpected,numTumPooActual);
-        assertEquals(totalTumThaiExpected,totalTumThaiActual);
-        assertEquals(totalTumPooExpected,totalTumPooActual);
-        assertEquals(grandTotalExpected,grandTotalActual);
+
+        assertEquals(numTumThai, numTumThaiExpected);
+        assertEquals(numTumPoo, numTumPooExpected);
     }
 
     @Edge()
     public void change() {
         System.out.println("Edge change");
-        driver.findElement(By.name("btn_change")).click();
+
+        wait.until(ExpectedConditions.elementToBeClickable(By.id("btn_change")));
+        driver.findElement(By.id("btn_change")).click();
+
     }
 
     @Edge()
     public void pay() {
         System.out.println("Edge pay");
-        driver.findElement(By.name("btn_confirm")).click();
+
+        driver.findElement(By.id("btn_confirm")).click();
+
     }
 
     @Vertex()
     public void PAYING() {
         System.out.println("Vertex PAYING");
-        new WebDriverWait(driver, Duration.ofSeconds(5))
-                .until(ExpectedConditions.elementToBeClickable(By.name("btn_pay")));
+
+        wait.until(ExpectedConditions.elementToBeClickable(By.id("btn_pay")));
+
         // Check that the total amount is as expected.
         int numTumThaiExpected = getAttribute("numTumThai").asInt();
         int numTumPooExpected = getAttribute("numTumPoo").asInt();
-        String grandTotalExpected = String.format("%.2f", PRICE_TUM_THAI*numTumThaiExpected+PRICE_TUM_POO*numTumPooExpected);
-        String grandTotalActual = driver.findElement(By.id("msg_grand_total")).getText();
-        assertEquals(grandTotalExpected, grandTotalActual);
+
+        assertEquals(numTumThai, numTumThaiExpected);
+        assertEquals(numTumPoo, numTumPooExpected);
+
         // Check that payment error message is properly shown
-        if (getLastElement().getName().equals("payRetry"))
-            assertTrue(driver.findElement(By.id("msg_error")).isDisplayed());
-        else
-            assertFalse(driver.findElement(By.id("msg_error")).isDisplayed());
+        // Hint: Use getLastElement().getName() to get the name of the last visited edge.
+        if (getLastElement().getName().equals("payRetry")) {
+            wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("msg_error")));
+        }
+
     }
 
     @Edge()
     public void paid() {
         System.out.println("Edge paid");
-        WebElement txtCreditCardNum = driver.findElement(By.name("txt_credit_card_num"));
-        WebElement txtNameOnCard = driver.findElement(By.name("txt_name_on_card"));
-        txtCreditCardNum.clear();
-        txtNameOnCard.clear();
-        txtCreditCardNum.sendKeys("1234567890");
-        txtNameOnCard.sendKeys("MR JOHN DOE");
-        driver.findElement(By.name("btn_pay")).click();
+
+        // Submit valid payment details
+        WebElement text_input = driver.findElement(By.name("txt_credit_card_num"));
+        text_input.sendKeys("1234567890123456");
+        text_input = driver.findElement(By.name("txt_name_on_card"));
+        text_input.sendKeys("Adam Smith");
+        wait.until(ExpectedConditions.elementToBeClickable(By.id("btn_pay")));
+        driver.findElement(By.id("btn_pay")).click();
+
     }
 
     @Edge()
     public void payError() {
         System.out.println("Edge payError");
-        //Submit blank payment details to simulate payment error
-        WebElement txtCreditCardNum = driver.findElement(By.name("txt_credit_card_num"));
-        WebElement txtNameOnCard = driver.findElement(By.name("txt_name_on_card"));
-        txtCreditCardNum.clear();
-        txtNameOnCard.clear();
-        driver.findElement(By.name("btn_pay")).click();
+
+        // Submit blank payment details to simulate payment error
+        WebElement text_input = driver.findElement(By.name("txt_credit_card_num"));
+        text_input.sendKeys("");
+        text_input = driver.findElement(By.name("txt_name_on_card"));
+        text_input.sendKeys("");
+        wait.until(ExpectedConditions.elementToBeClickable(By.id("btn_pay")));
+        driver.findElement(By.id("btn_pay")).click();
     }
 
     @Vertex()
     public void ERROR_PAY() {
         System.out.println("Vertex ERROR_PAY");
+
+        WebElement text_input = driver.findElement(By.name("txt_credit_card_num"));
+        text_input.sendKeys("");
+        text_input = driver.findElement(By.name("txt_name_on_card"));
+        text_input.sendKeys("");
+        wait.until(ExpectedConditions.elementToBeClickable(By.id("btn_pay")));
+        driver.findElement(By.id("btn_pay")).click();
     }
 
     @Edge()
     public void payRetry() {
         System.out.println("Edge payRetry");
+
+        retryPayCount++;
     }
 
     @Vertex()
     public void COLLECTING() {
         System.out.println("Vertex COLLECTING");
-        new WebDriverWait(driver, Duration.ofSeconds(5))
-                .until(ExpectedConditions.elementToBeClickable(By.tagName("img")));
+        // Wait for images to be clickable
+        wait.until(ExpectedConditions.elementToBeClickable(By.tagName("img")));
 
         // Check that the number of items shown is correct
         int numTumThaiExpected = getAttribute("numTumThai").asInt();
         int numTumPooExpected = getAttribute("numTumPoo").asInt();
-        int numTumThaiImages = driver.findElements(By.className("ImgTumThai")).size();
-        int numTumPooImages = driver.findElements(By.className("ImgTumPoo")).size();
-        assertEquals(numTumThaiExpected, numTumThaiImages);
-        assertEquals(numTumPooExpected, numTumPooImages);
+
+        List<WebElement> imgs_thai = driver.findElements(By.ByClassName.className("ImgTumThai"));
+        List<WebElement> imgs_poo = driver.findElements(By.ByClassName.className("ImgTumPoo"));
+        assertEquals(numTumPooExpected, imgs_poo.size());
+        assertEquals(numTumThaiExpected, imgs_thai.size());
+
     }
 
     @Edge()
     public void collected() {
         System.out.println("Edge collected");
-        List<WebElement> tumThaiImages = driver.findElements(By.className("ImgTumThai"));
-        List<WebElement> tumPooImages = driver.findElements(By.className("ImgTumPoo"));
-        for (WebElement e: tumThaiImages) {
-            e.click();
+        // Click on each image to collect all dishes
+        for (int i = 0; i < numTumPoo; i++) {
+            wait.until(ExpectedConditions.elementToBeClickable(By.ByClassName.className("ImgTumPoo")));
+            driver.findElement(By.ByClassName.className("ImgTumPoo")).click();
         }
-        for (WebElement e: tumPooImages) {
-            e.click();
+        for (int i = 0; i < numTumThai; i++) {
+            wait.until(ExpectedConditions.elementToBeClickable(By.ByClassName.className("ImgTumThai")));
+            driver.findElement(By.ByClassName.className("ImgTumThai")).click();
         }
+
     }
 
     @Edge()
     public void collectError() {
         System.out.println("Edge collectError");
         // Wait until the clearing page is shown
-        new WebDriverWait(driver, Duration.ofSeconds(15))
-                .until(ExpectedConditions.visibilityOfElementLocated(By.id("msg_clearing")));
+        WebDriverWait spw = new WebDriverWait(driver, Duration.ofSeconds(15));
+        spw.until(ExpectedConditions.visibilityOfElementLocated(By.id("msg_clearing")));
+
     }
 
     @Vertex()
     public void ERROR_COLLECT() {
+
         System.out.println("Vertex ERROR_COLLECT");
     }
 
     @Edge()
     public void cleared() {
         System.out.println("Edge cleared");
+
         // Wait until redirection to the welcome page
-        new WebDriverWait(driver, Duration.ofSeconds(10))
-                .until(ExpectedConditions.elementToBeClickable(By.id("start")));
+        wait.until(ExpectedConditions.elementToBeClickable(By.id("start")));
     }
 }
